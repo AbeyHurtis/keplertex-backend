@@ -1,183 +1,151 @@
-const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const { fetch } = require("undici");
-const crypto = require("crypto");
+import AWS from "aws-sdk";
+import crypto from "crypto";
+import fetch from "node-fetch";
 
-// ---- env ----
-const {
-  JWT_SECRET,
-  USERS_TABLE,
-  RL_TABLE,
-  FREE_RPM = "30",
-  PRO_RPM = "120",
-  COMPILER_URL,
-  INTERNAL_SHARED_SECRET
-} = process.env;
+const dynamo = new AWS.DynamoDB.DocumentClient();
+const USERS_TABLE = process.env.USERS_TABLE;
+const COMPILER_SERVICE_URL = process.env.COMPILER_SERVICE_URL;
+const DAILY_LIMIT = 20;
 
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-
-// Helpers
-const json = (statusCode, body) => ({
-  statusCode,
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify(body)
-});
-
-function parseBody(event) {
-  if (!event.body) return {};
-  return event.isBase64Encoded ? JSON.parse(Buffer.from(event.body, "base64").toString()) : JSON.parse(event.body);
+// Hash password
+function hashPassword(password) {
+  return crypto.createHash("sha256").update(password).digest("hex");
 }
 
-function getPathAndMethod(event) {
-  // HTTP API shape
-  const path = event.rawPath || event.path || "/";
-  const method = event.requestContext?.http?.method || event.httpMethod || "GET";
-  return { path, method };
+// Generate token
+function generateToken() {
+  return crypto.randomBytes(16).toString("hex");
 }
 
-function signJwt(user) {
-  return jwt.sign(
-    { sub: user.userId, username: user.username, plan: user.plan },
-    JWT_SECRET,
-    { algorithm: "HS256", expiresIn: "1h" }
-  );
-}
+// Main Lambda handler
+export async function handler(event) {
+  const { path, httpMethod, body } = event;
+  const data = body ? JSON.parse(body) : {};
 
-function verifyAuth(event) {
-  const h = event.headers?.authorization || event.headers?.Authorization || "";
-  const [, token] = h.split(" ");
-  if (!token) throw Object.assign(new Error("Unauthorized"), { statusCode: 401 });
-  try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch {
-    throw Object.assign(new Error("Unauthorized"), { statusCode: 401 });
+  if (path === "/signup" && httpMethod === "POST") {
+    return signup(data);
   }
-}
+  if (path === "/login" && httpMethod === "POST") {
+    return login(data);
+  }
+  if (path === "/checklogin" && httpMethod === "GET") {
+    return checkLogin(event);
+  }
+  if (path === "/compile" && httpMethod === "POST") {
+    return compileLatex(event);
+  }
 
-async function getUserByEmail(email) {
-  const r = await ddb.send(new GetCommand({ TableName: USERS_TABLE, Key: { email } }));
-  return r.Item;
-}
-
-async function createUser({ email, username, password }) {
-  const existing = await getUserByEmail(email);
-  if (existing) throw Object.assign(new Error("User exists"), { statusCode: 409 });
-  const passwordHash = await bcrypt.hash(password, 12);
-  const user = {
-    email,
-    userId: crypto.randomUUID(),
-    username,
-    passwordHash,
-    plan: "free",
-    createdAt: new Date().toISOString()
+  return {
+    statusCode: 404,
+    body: JSON.stringify({ error: "Not found" }),
   };
-  await ddb.send(new PutCommand({ TableName: USERS_TABLE, Item: user, ConditionExpression: "attribute_not_exists(email)" }));
-  return user;
 }
 
-async function login({ email, password }) {
-  const user = await getUserByEmail(email);
-  if (!user) throw Object.assign(new Error("Invalid credentials"), { statusCode: 401 });
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) throw Object.assign(new Error("Invalid credentials"), { statusCode: 401 });
-  return { access_token: signJwt(user), user: { userId: user.userId, username: user.username, plan: user.plan } };
-}
-
-function windowKey(userId, nowMs, windowSec = 60) {
-  const bucket = Math.floor(nowMs / 1000 / windowSec);
-  return `${userId}#${bucket}`;
-}
-
-async function rateLimit(user, now = Date.now()) {
-  const perMin = user.plan === "pro" ? Number(PRO_RPM) : Number(FREE_RPM);
-  const key = windowKey(user.sub, now, 60);
-  const ttl = Math.floor(now / 1000) + 120; // keep items 2 minutes
-  // Atomic increment with condition on limit
-  const r = await ddb.send(new UpdateCommand({
-    TableName: RL_TABLE,
-    Key: { userWindow: key },
-    UpdateExpression: "ADD #c :one SET #t = :ttl",
-    ExpressionAttributeNames: { "#c": "count", "#t": "ttl" },
-    ExpressionAttributeValues: { ":one": 1, ":ttl": ttl },
-    ReturnValues: "ALL_NEW"
-  }));
-  const count = r.Attributes?.count || 0;
-  if (count > perMin) {
-    throw Object.assign(new Error("Rate limit exceeded"), { statusCode: 429, extra: { limit: perMin, windowSeconds: 60 } });
+// Signup
+async function signup({ email, password }) {
+  const user = await dynamo.get({ TableName: USERS_TABLE, Key: { email } }).promise();
+  if (user.Item) {
+    return { statusCode: 400, body: JSON.stringify({ error: "User exists" }) };
   }
+
+  const passwordHash = hashPassword(password);
+  const token = generateToken();
+
+  await dynamo.put({
+    TableName: USERS_TABLE,
+    Item: {
+      email,
+      passwordHash,
+      token,
+      requestsToday: 0,
+      lastRequestDate: new Date().toISOString().split("T")[0],
+    },
+  }).promise();
+
+  return { statusCode: 201, body: JSON.stringify({ token }) };
 }
 
-async function proxyCompile(user, event) {
-  // Expect JSON body: { latexCode: "...", filename?: "main.tex" }
-  const body = parseBody(event);
-  if (!body?.latexCode) throw Object.assign(new Error("latexCode required"), { statusCode: 400 });
+// Login
+async function login({ email, password }) {
+  const user = await dynamo.get({ TableName: USERS_TABLE, Key: { email } }).promise();
+  if (!user.Item || user.Item.passwordHash !== hashPassword(password)) {
+    return { statusCode: 401, body: JSON.stringify({ error: "Invalid credentials" }) };
+  }
 
-  const resp = await fetch(`${COMPILER_URL.replace(/\/$/, "")}/compile`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-internal-auth": INTERNAL_SHARED_SECRET,
-      "x-user-id": user.sub,
-      "x-user-plan": user.plan
+  return { statusCode: 200, body: JSON.stringify({ token: user.Item.token }) };
+}
+
+// Check login
+async function checkLogin(event) {
+  const token = event.headers.Authorization;
+  if (!token) return { statusCode: 401, body: JSON.stringify({ error: "No token" }) };
+
+  const user = await dynamo.scan({
+    TableName: USERS_TABLE,
+    FilterExpression: "token = :token",
+    ExpressionAttributeValues: { ":token": token },
+  }).promise();
+
+  if (user.Items.length === 0) {
+    return { statusCode: 401, body: JSON.stringify({ error: "Invalid token" }) };
+  }
+
+  return { statusCode: 200, body: JSON.stringify({ message: "Valid token" }) };
+}
+
+// Compile LaTeX
+async function compileLatex(event) {
+  const token = event.headers.Authorization;
+  if (!token) return { statusCode: 401, body: JSON.stringify({ error: "No token" }) };
+
+  const user = await dynamo.scan({
+    TableName: USERS_TABLE,
+    FilterExpression: "token = :token",
+    ExpressionAttributeValues: { ":token": token },
+  }).promise();
+
+  if (user.Items.length === 0) {
+    return { statusCode: 401, body: JSON.stringify({ error: "Invalid token" }) };
+  }
+
+  // Rate limit check
+  const today = new Date().toISOString().split("T")[0];
+  let requestsToday = user.Items[0].requestsToday;
+  let lastRequestDate = user.Items[0].lastRequestDate;
+
+  if (today !== lastRequestDate) {
+    requestsToday = 0;
+    lastRequestDate = today;
+  }
+
+  if (requestsToday >= DAILY_LIMIT) {
+    return { statusCode: 429, body: JSON.stringify({ error: "Daily limit reached" }) };
+  }
+
+  // Update usage
+  await dynamo.update({
+    TableName: USERS_TABLE,
+    Key: { email: user.Items[0].email },
+    UpdateExpression: "SET requestsToday = :req, lastRequestDate = :date",
+    ExpressionAttributeValues: {
+      ":req": requestsToday + 1,
+      ":date": today,
     },
-    body: JSON.stringify(body)
+  }).promise();
+
+  // Forward to compiler service
+  const { latexRaw } = JSON.parse(event.body);
+  const res = await fetch(`${COMPILER_SERVICE_URL}/compile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ latexRaw }),
   });
 
-  const ct = resp.headers.get("content-type") || "";
-  const status = resp.status;
-
-  if (ct.includes("application/pdf")) {
-    const buf = Buffer.from(await resp.arrayBuffer());
-    return {
-      statusCode: status,
-      isBase64Encoded: true,
-      headers: {
-        "content-type": "application/pdf",
-        "content-disposition": 'inline; filename="output.pdf"'
-      },
-      body: buf.toString("base64")
-    };
-  }
-
-  // Forward JSON/text errors
-  const text = await resp.text();
-  let out;
-  try { out = JSON.parse(text); } catch { out = { error: text }; }
-  return json(status, out);
+  const pdfBuffer = await res.arrayBuffer();
+  return {
+    statusCode: 200,
+    headers: { "Content-Type": "application/pdf" },
+    body: Buffer.from(pdfBuffer).toString("base64"),
+    isBase64Encoded: true,
+  };
 }
-
-// ---- Lambda handler ----
-exports.handler = async (event) => {
-  try {
-    const { path, method } = getPathAndMethod(event);
-
-    // Routes
-    if (path === "/signup" && method === "POST") {
-      const body = parseBody(event);
-      if (!body.email || !body.username || !body.password) return json(400, { error: "email, username, password required" });
-      const user = await createUser(body);
-      return json(201, { ok: true, user: { userId: user.userId, username: user.username, plan: user.plan } });
-    }
-
-    if (path === "/login" && method === "POST") {
-      const body = parseBody(event);
-      if (!body.email || !body.password) return json(400, { error: "email, password required" });
-      const result = await login(body);
-      return json(200, result);
-    }
-
-    if (path === "/compile" && method === "POST") {
-      const user = verifyAuth(event);       // throws 401 if invalid
-      await rateLimit(user);                // throws 429 if exceeded
-      return await proxyCompile(user, event);
-    }
-
-    // default
-    return json(404, { error: "Not found" });
-  } catch (err) {
-    const status = err.statusCode || 500;
-    return json(status, { error: err.message || "Internal error", ...(err.extra || {}) });
-  }
-};
