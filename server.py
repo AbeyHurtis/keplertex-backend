@@ -12,6 +12,11 @@ SECRET = os.environ['INTERNAL_SHARED_SECRET']
 #   -F 'tex_file=@./test.tex' \
 #   --output output.pdf
 
+# curl -X POST http://localhost:5000/compile \
+#   -H "x-internal-auth:ReplaceInternalSecret" \
+#   -F "tex_file=@test.tex" \
+#   --output output.pdf
+
 # Test Command - Deployment
 # curl -X POST https://texlive-latest.onrender.com/compile \
 #   -F 'tex_file=@./main.tex' \
