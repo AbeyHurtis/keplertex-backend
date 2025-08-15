@@ -22,7 +22,6 @@ SECRET = os.environ['INTERNAL_SHARED_SECRET']
 #   -F 'tex_file=@./main.tex' \
 #   --output output.pdf
 
-
 @app.middleware("http")
 async def verify_internal_secret(request, call_next): 
     if request.headers.get("x-internal-auth") != SECRET:
