@@ -8,11 +8,7 @@ const dynamo = DynamoDBDocumentClient.from(client);
 
 const USERS_TABLE = process.env.USERS_TABLE;
 const COMPILER_SERVICE_URL = process.env.COMPILER_SERVICE_URL;
-const DAILY_LIMIT = 20;
-
-// GitHub OAuth config
-const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
-const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
+const DAILY_LIMIT = 5;
 
 // Hash password
 function hashPassword(password) {
@@ -35,10 +31,6 @@ export async function handler(event) {
         return compileLatex(event);
     }
     const data = body ? JSON.parse(body) : {};
-
-    console.log("******************")
-    console.log({ path, httpMethod, body, data });
-    console.log("******************")
 
     if (path === "/signup" && httpMethod === "POST") {
         return signup(data);
@@ -177,10 +169,10 @@ async function getGithubUser(access_token) {
 // Check login
 async function checkLogin(event) {
     const token = event.headers.authorization;
-    console.log("**********");
-    console.log("check login event : ", event);
-    console.log("token : ", token);
-    console.log("**********");
+
+
+
+
     if (!token) return { statusCode: 401, body: JSON.stringify({ error: "No token" }) };
 
     const user = await dynamo.send(new ScanCommand({
@@ -189,12 +181,12 @@ async function checkLogin(event) {
         ExpressionAttributeValues: { ":accountToken": token },
     }));
 
-    console.log("---------")
-    console.log("user checklogin: ", user); 
-    console.log("----------")
+
+
+
 
     if (user.Items.length === 0) {
-        console.log("user Items == 0 ")
+    
         return { statusCode: 401, body: JSON.stringify({ error: "Invalid token" }) };
     }
 
@@ -212,11 +204,6 @@ async function compileLatex(event) {
         FilterExpression: "accountToken = :accountToken",
         ExpressionAttributeValues: { ":accountToken": token },
     }));
-
-
-    console.log("**********");
-    console.log("user from compileLatex: ", user);
-    console.log("**********");
 
     if (user.Items.length === 0) {
         return { statusCode: 401, body: JSON.stringify({ error: "Invalid token" }) };
@@ -248,7 +235,6 @@ async function compileLatex(event) {
     // Forward multipart form-data to compiler service
     const buffer = Buffer.from(event.body, event.isBase64Encoded ? "base64" : "utf8");
 
-    
     const res = await fetch(`${COMPILER_SERVICE_URL}/compile`, {
         method: "POST",
         headers: {
