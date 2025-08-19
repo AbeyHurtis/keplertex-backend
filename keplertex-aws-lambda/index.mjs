@@ -1,4 +1,4 @@
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import crypto from "crypto";
 import fetch from "node-fetch";
@@ -49,14 +49,39 @@ export async function handler(event) {
         return checkLogin(event);
     }
 
+    if (path === "/checkusername" && httpMethod === "GET") {
+        return checkUsername(event);
+    }
+
     return { statusCode: 404, body: JSON.stringify({ error: "Not found" }) };
 }
 
+
+async function checkUsername(event) {
+    const username = event.queryStringParameters?.username;
+    if (!username) {
+        return { statusCode: 400, body: JSON.stringify({ error: "Username required" }) };
+    }
+
+    const result = await dynamo.send(new GetItemCommand({
+        TableName: USERS_TABLE,
+        Key: {
+            username: { S: username }
+        }
+    }));
+    const exists = !!result.Item;
+    return {
+        statusCode: 200,
+        body: JSON.stringify({ exists })
+    };
+}
+
+
 // Email/password signup
-async function signup({ email, password }) {
+async function signup({ username, email, password }) {
     const user = await dynamo.send(new GetCommand({
         TableName: USERS_TABLE,
-        Key: { email }
+        Key: { username }
     }));
     if (user.Item) {
         return { statusCode: 400, body: JSON.stringify({ error: "User exists" }) };
@@ -68,6 +93,7 @@ async function signup({ email, password }) {
     await dynamo.send(new PutCommand({
         TableName: USERS_TABLE,
         Item: {
+            username: username,
             email,
             passwordHash,
             accountToken: token,
@@ -81,10 +107,10 @@ async function signup({ email, password }) {
 }
 
 // Email/password login
-async function login({ email, password }) {
+async function login({ username, password }) {
     const user = await dynamo.send(new GetCommand({
         TableName: USERS_TABLE,
-        Key: { email }
+        Key: { username }
     }));
     if (!user.Item || user.Item.passwordHash !== hashPassword(password)) {
         return { statusCode: 401, body: JSON.stringify({ error: "Invalid credentials" }) };
@@ -112,9 +138,9 @@ async function githubSignup(code) {
     await dynamo.send(new PutCommand({
         TableName: USERS_TABLE,
         Item: {
+            username,
             email: email || `${githubId}@github.local`,
             githubId,
-            username,
             avatar_url,
             accountToken: token,
             provider: "github",
@@ -170,9 +196,6 @@ async function getGithubUser(access_token) {
 async function checkLogin(event) {
     const token = event.headers.authorization;
 
-
-
-
     if (!token) return { statusCode: 401, body: JSON.stringify({ error: "No token" }) };
 
     const user = await dynamo.send(new ScanCommand({
@@ -181,12 +204,8 @@ async function checkLogin(event) {
         ExpressionAttributeValues: { ":accountToken": token },
     }));
 
-
-
-
-
     if (user.Items.length === 0) {
-    
+
         return { statusCode: 401, body: JSON.stringify({ error: "Invalid token" }) };
     }
 
@@ -224,7 +243,7 @@ async function compileLatex(event) {
 
     await dynamo.send(new UpdateCommand({
         TableName: USERS_TABLE,
-        Key: { email: user.Items[0].email },
+        Key: { username: user.Items[0].username },
         UpdateExpression: "SET requestsToday = :req, lastRequestDate = :date",
         ExpressionAttributeValues: {
             ":req": requestsToday + 1,
