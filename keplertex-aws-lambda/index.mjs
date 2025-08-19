@@ -123,14 +123,23 @@ async function githubSignup(code) {
     const githubData = await getGithubUser(code);
     const { id: githubId, email, login: username, avatar_url } = githubData;
 
-    // Check if user already exists
-    const existing = await dynamo.send(new ScanCommand({
+    // // Check if user already exists
+    // const existing = await dynamo.send(new ScanCommand({
+    //     TableName: USERS_TABLE,
+    //     FilterExpression: "githubId = :gid",
+    //     ExpressionAttributeValues: { ":gid": githubId },
+    // }));
+
+    const existing = await dynamo.send(new GetItemCommand({
         TableName: USERS_TABLE,
-        FilterExpression: "githubId = :gid",
-        ExpressionAttributeValues: { ":gid": githubId },
+        Key: {
+            username: { S: username }
+        }
     }));
 
-    if (existing.Items.length > 0) {
+    const exists = !!existing.Item;
+
+    if (exists) {
         return { statusCode: 400, body: JSON.stringify({ error: "GitHub account already linked" }) };
     }
 
@@ -155,19 +164,29 @@ async function githubSignup(code) {
 // GitHub login
 async function githubLogin(code) {
     const githubData = await getGithubUser(code);
-    const { id: githubId } = githubData;
+    // const { id: githubId } = githubData;
+    const { id: githubId, email, login: username, avatar_url } = githubData;
 
-    const user = await dynamo.send(new ScanCommand({
+
+    // const user = await dynamo.send(new ScanCommand({
+    //     TableName: USERS_TABLE,
+    //     FilterExpression: "githubId = :gid",
+    //     ExpressionAttributeValues: { ":gid": githubId },
+    // }));
+
+    const user = await dynamo.send(new GetItemCommand({
         TableName: USERS_TABLE,
-        FilterExpression: "githubId = :gid",
-        ExpressionAttributeValues: { ":gid": githubId },
+        Key: {
+            username: { S: username }
+        }
     }));
 
-    if (user.Items.length === 0) {
+    const exists = !!user.Item;
+    if (!exists) {
         return { statusCode: 404, body: JSON.stringify({ error: "No account linked with this GitHub" }) };
     }
 
-    return { statusCode: 200, body: JSON.stringify({ token: user.Items[0].accountToken }) };
+    return { statusCode: 200, body: JSON.stringify({ token: user.Item.accountToken }) };
 }
 
 // Get GitHub user data
@@ -223,7 +242,6 @@ async function compileLatex(event) {
         FilterExpression: "accountToken = :accountToken",
         ExpressionAttributeValues: { ":accountToken": token },
     }));
-
     if (user.Items.length === 0) {
         return { statusCode: 401, body: JSON.stringify({ error: "Invalid token" }) };
     }
