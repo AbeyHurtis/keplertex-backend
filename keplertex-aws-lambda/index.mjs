@@ -8,7 +8,7 @@ const dynamo = DynamoDBDocumentClient.from(client);
 
 const USERS_TABLE = process.env.USERS_TABLE;
 const COMPILER_SERVICE_URL = process.env.COMPILER_SERVICE_URL;
-const DAILY_LIMIT = 5;
+const DAILY_LIMIT = 50;
 
 // Hash password
 function hashPassword(password) {
@@ -19,6 +19,24 @@ function hashPassword(password) {
 function generateToken() {
     return crypto.randomBytes(16).toString("hex");
 }
+
+function validatePassword(password) {
+    const specialCharsRegex = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~]/g;
+    const nums = /\d/;
+
+    if (password.length < 8) {
+        return "Password must be at least 8 characters.";
+    }
+    if (!nums.test(password)) {
+        return "Password must include at least one number.";
+    }
+    const charMatches = password.match(specialCharsRegex);
+    if (!charMatches || charMatches.length < 2) {
+        return "Password must include at least 2 special characters.";
+    }
+    return null; // valid
+}
+
 
 // Main Lambda handler
 export async function handler(event) {
@@ -59,6 +77,7 @@ export async function handler(event) {
 
 async function checkUsername(event) {
     const username = event.queryStringParameters?.username;
+    // console.log("event from checkeUsername : ", event); 
     if (!username) {
         return { statusCode: 400, body: JSON.stringify({ error: "Username required" }) };
     }
@@ -79,6 +98,11 @@ async function checkUsername(event) {
 
 // Email/password signup
 async function signup({ username, email, password }) {
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+        return { statusCode: 400, body: JSON.stringify({ error: passwordError }) };
+    }
+    
     const user = await dynamo.send(new GetCommand({
         TableName: USERS_TABLE,
         Key: { username }
