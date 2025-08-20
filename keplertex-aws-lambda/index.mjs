@@ -1,5 +1,5 @@
 import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, ScanCommand, UpdateCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import crypto from "crypto";
 import fetch from "node-fetch";
 
@@ -9,6 +9,7 @@ const dynamo = DynamoDBDocumentClient.from(client);
 const USERS_TABLE = process.env.USERS_TABLE;
 const COMPILER_SERVICE_URL = process.env.COMPILER_SERVICE_URL;
 const DAILY_LIMIT = 50;
+const EMAIL_INDEX = process.env.EMAIL_INDEX;
 
 // Hash password
 function hashPassword(password) {
@@ -105,23 +106,58 @@ async function checkUsername(event) {
 }
 
 
+async function emailExists(email) {
+    if (!email) {
+        throw new Error("Email required");
+    }
+    const result = await dynamo.send(new QueryCommand({
+        TableName: USERS_TABLE,
+        IndexName: EMAIL_INDEX, 
+        KeyConditionExpression: "email = :email",
+        ExpressionAttributeValues: { ":email": email },
+        Limit: 1
+    }));
+
+    return result.Count > 0;
+}
+
+
+
+// async function checkEmailExists(event) {
+//     const email = event.queryStringParameters?.email; 
+//     if(!email){
+//         return {statusCode: 400, body: JSON.stringify({ error: "Email required"})};
+//     }
+
+//     const exists = emailExists(email);
+
+//     return {
+//         statusCode: 200, 
+//         body: JSON.stringify({ exists })
+//     };
+// }
+
 // Email/password signup
 async function signup({ username, email, password }) {
     const passwordError = validatePassword(password);
     if (passwordError) {
         return { statusCode: 400, body: JSON.stringify({ error: passwordError }) };
     }
-    const emailError = validateEmail(email); 
-    if(!emailError){
-        return { statusCode: 400, body: JSON.stringify({ error: emailError})};
+
+   if (!validateEmail(email)) {
+        return { statusCode: 400, body: JSON.stringify({ error: "Invalid email" }) };
     }
-    
+
+
     const user = await dynamo.send(new GetCommand({
         TableName: USERS_TABLE,
         Key: { username }
     }));
     if (user.Item) {
-        return { statusCode: 400, body: JSON.stringify({ error: "User exists" }) };
+        return { statusCode: 400, body: JSON.stringify({ error: "Username in use" }) };
+    }
+    if (await emailExists(email)) {
+        return { statusCode: 400, body: JSON.stringify({ error: "Email in use" }) };
     }
 
     const passwordHash = hashPassword(password);
