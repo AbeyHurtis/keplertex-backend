@@ -34,6 +34,10 @@ function validatePassword(password) {
     if (!charMatches || charMatches.length < 2) {
         return "Password must include at least 2 special characters.";
     }
+    if(!/[A-Z]/.test(password)){
+        return "Password must include one capital letter";
+    }
+
     return null; // valid
 }
 
