@@ -20,6 +20,11 @@ function generateToken() {
     return crypto.randomBytes(16).toString("hex");
 }
 
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(String(email).toLowerCase());
+}
+
 function validatePassword(password) {
     const specialCharsRegex = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~]/g;
     const nums = /\d/;
@@ -105,6 +110,10 @@ async function signup({ username, email, password }) {
     const passwordError = validatePassword(password);
     if (passwordError) {
         return { statusCode: 400, body: JSON.stringify({ error: passwordError }) };
+    }
+    const emailError = validateEmail(email); 
+    if(!emailError){
+        return { statusCode: 400, body: JSON.stringify({ error: emailError})};
     }
     
     const user = await dynamo.send(new GetCommand({
