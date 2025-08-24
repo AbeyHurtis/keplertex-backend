@@ -72,7 +72,7 @@ async def compile_latex(background_tasks: BackgroundTasks,
                        stderr=subprocess.PIPE)
         
         if bib_file: 
-            with open(bib_file, "wb"):
+            with open(bib_file_name, "wb") as f:
                 content = await tex_file.read()
                 f.write(content)
 
