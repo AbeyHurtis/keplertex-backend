@@ -30,7 +30,7 @@ async def verify_internal_secret(request, call_next):
 
 def cleanup_files(job_id):
     # Clean up all generated files
-    extensions = ['aux', 'log', 'pdf', 'tex']
+    extensions = ['aux', 'log', 'pdf', 'tex', 'out']
     for ext in extensions:
         f = f"{job_id}.{ext}"
         if os.path.exists(f):
@@ -45,6 +45,7 @@ def read_root():
 @app.post("/compile")
 async def compile_latex(background_tasks: BackgroundTasks,
                         tex_file: UploadFile = File(...),
+                        bib_file: UploadFile = File(None),
                         x_internal_auth: str = Header(None)):
     
     # Check secret
@@ -53,6 +54,7 @@ async def compile_latex(background_tasks: BackgroundTasks,
 
     job_id = str(uuid.uuid4())
     tex_file_name = f"{job_id}.tex"
+    bib_file_name = f"{job_id}.tex"
     pdf_file = f"{job_id}.pdf"
 
     try:
@@ -60,17 +62,33 @@ async def compile_latex(background_tasks: BackgroundTasks,
         with open(tex_file_name, "wb") as f:
             content = await tex_file.read()
             f.write(content)
-
+        # Write the bib file if present 
         if not os.path.exists(tex_file_name):
             return PlainTextResponse("Failed to save uploaded file.", status_code=500)
-        print("file upload complete")
+
         # Run pdflatex (twice is common for references/toc)
         subprocess.run(["pdflatex", tex_file_name], check=True,
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
+        
+        if bib_file: 
+            with open(bib_file, "wb"):
+                content = await tex_file.read()
+                f.write(content)
+
+            if not os.path.exists(bib_file_name):
+                return PlainTextResponse("Failed to save uploaded file.", status_code=500)
+            subprocess.run(["bibtex", bib_file_name], check=True,
+                           stdout=subprocess.PIPE, 
+                           stderr=subprocess.PIPE)
+            subprocess.run(["pdflatex", tex_file_name], check=True,
+                       stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE)
+
         subprocess.run(["pdflatex", tex_file_name], check=True,
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
+        
         # Debuging lines
         # result = subprocess.run(["pdflatex", tex_file_name], check=True,
         # stdout=subprocess.PIPE, stderr=subprocess.PIPE)

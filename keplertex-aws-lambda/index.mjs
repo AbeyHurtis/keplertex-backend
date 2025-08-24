@@ -157,7 +157,7 @@ async function signup({ username, email, password }) {
         return { statusCode: 400, body: JSON.stringify({ error: "Username in use" }) };
     }
     if (await emailExists(email)) {
-        return { statusCode: 400, body: JSON.stringify({ error: "Email in use" }) };
+        return { statusCode: 400, body: JSON.stringify({ error: "It looks like you already have an account with this email. Did you forget your password?" }) };
     }
 
     const passwordHash = hashPassword(password);
