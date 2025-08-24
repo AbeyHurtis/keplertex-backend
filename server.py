@@ -54,7 +54,7 @@ async def compile_latex(background_tasks: BackgroundTasks,
 
     job_id = str(uuid.uuid4())
     tex_file_name = f"{job_id}.tex"
-    bib_file_name = f"{job_id}.tex"
+    bib_file_name = f"{job_id}.bib"
     pdf_file = f"{job_id}.pdf"
 
     try:
