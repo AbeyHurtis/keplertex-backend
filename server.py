@@ -64,12 +64,6 @@ async def compile_latex(background_tasks: BackgroundTasks,
             content = await tex_file.read()
             f.write(content)
 
-        # Write the bib file if present 
-        if not os.path.exists(f"./{job_id}/{tex_file_name}"):
-            return PlainTextResponse("Failed to save uploaded file.", status_code=500)
-
-        
-        
         # Run pdflatex (twice is common for references/toc)
         subprocess.run(["pdflatex", tex_file_name], cwd=job_id,
                        check=True,
@@ -82,8 +76,6 @@ async def compile_latex(background_tasks: BackgroundTasks,
                 with open(f"./{job_id}/{bib_file_name}", "wb") as f:
                     content = await bib_file.read()
                     f.write(content)
-                if not os.path.exists(f"./{job_id}/{bib_file_name}"):
-                    return PlainTextResponse("Failed to save uploaded file.", status_code=500)
         
             subprocess.run(["bibtex", job_id], cwd=job_id,
                            check=True,
