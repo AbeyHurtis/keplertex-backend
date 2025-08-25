@@ -1,6 +1,7 @@
 from fastapi import FastAPI, BackgroundTasks, File, UploadFile, Header, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 import subprocess
+import shutil
 import uuid
 import os
 
@@ -30,12 +31,9 @@ async def verify_internal_secret(request, call_next):
 
 def cleanup_files(job_id):
     # Clean up all generated files
-    extensions = ['aux', 'log', 'pdf', 'tex', 'out']
-    for ext in extensions:
-        f = f"{job_id}.{ext}"
-        if os.path.exists(f):
-            os.remove(f)
+    shutil.rmtree(job_id, ignore_errors=True)
 
+    
 
 @app.get("/")
 def read_root():
@@ -54,38 +52,50 @@ async def compile_latex(background_tasks: BackgroundTasks,
 
     job_id = str(uuid.uuid4())
     tex_file_name = f"{job_id}.tex"
-    bib_file_name = f"{job_id}.bib"
     pdf_file = f"{job_id}.pdf"
 
     try:
+        # write create folder for job id 
+        os.makedirs(job_id, exist_ok=True)
+        
         # Write the LaTeX source code to a .tex file
-        with open(tex_file_name, "wb") as f:
+        with open(f"./{job_id}/{tex_file_name}", "wb") as f:
             content = await tex_file.read()
             f.write(content)
+
         # Write the bib file if present 
-        if not os.path.exists(tex_file_name):
+        if not os.path.exists(f"./{job_id}/{tex_file_name}"):
             return PlainTextResponse("Failed to save uploaded file.", status_code=500)
 
+        
+        
         # Run pdflatex (twice is common for references/toc)
-        subprocess.run(["pdflatex", tex_file_name], check=True,
+        subprocess.run(["pdflatex", tex_file_name], cwd=job_id,
+                       check=True,
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
         
         if bib_file: 
-            with open(bib_file_name, "wb") as f:
-                content = await tex_file.read()
+            bib_file_name = f"{bib_file.filename}"
+            with open(f"./{job_id}/{bib_file_name}", "wb") as f:
+                content = await bib_file.read()
                 f.write(content)
 
-            if not os.path.exists(bib_file_name):
+            if not os.path.exists(f"./{job_id}/{bib_file_name}"):
                 return PlainTextResponse("Failed to save uploaded file.", status_code=500)
-            subprocess.run(["bibtex", bib_file_name], check=True,
+        
+            subprocess.run(["bibtex", job_id], cwd=job_id,
+                           check=True,
                            stdout=subprocess.PIPE, 
                            stderr=subprocess.PIPE)
-            subprocess.run(["pdflatex", tex_file_name], check=True,
+            
+            subprocess.run(["pdflatex", tex_file_name], cwd=job_id,
+                        check=True,
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
 
-        subprocess.run(["pdflatex", tex_file_name], check=True,
+        subprocess.run(["pdflatex", tex_file_name], cwd=job_id,
+                       check=True,
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
         
@@ -102,7 +112,7 @@ async def compile_latex(background_tasks: BackgroundTasks,
         background_tasks.add_task(cleanup_files, job_id)
 
         # Return the compiled PDF
-        return FileResponse(pdf_file, media_type='application/pdf',
+        return FileResponse(f"./{job_id}/{pdf_file}", media_type='application/pdf',
                             filename='output.pdf')
 
     except subprocess.CalledProcessError as e:
