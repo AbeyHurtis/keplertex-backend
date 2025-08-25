@@ -1,5 +1,6 @@
 from fastapi import FastAPI, BackgroundTasks, File, UploadFile, Header, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
+from typing import List
 import subprocess
 import shutil
 import uuid
@@ -43,7 +44,7 @@ def read_root():
 @app.post("/compile")
 async def compile_latex(background_tasks: BackgroundTasks,
                         tex_file: UploadFile = File(...),
-                        bib_file: UploadFile = File(None),
+                        bib_files: List[UploadFile] = File(None),
                         x_internal_auth: str = Header(None)):
     
     # Check secret
@@ -75,14 +76,14 @@ async def compile_latex(background_tasks: BackgroundTasks,
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
         
-        if bib_file: 
-            bib_file_name = f"{bib_file.filename}"
-            with open(f"./{job_id}/{bib_file_name}", "wb") as f:
-                content = await bib_file.read()
-                f.write(content)
-
-            if not os.path.exists(f"./{job_id}/{bib_file_name}"):
-                return PlainTextResponse("Failed to save uploaded file.", status_code=500)
+        if bib_files: 
+            for bib_file in bib_files: 
+                bib_file_name = f"{bib_file.filename}"
+                with open(f"./{job_id}/{bib_file_name}", "wb") as f:
+                    content = await bib_file.read()
+                    f.write(content)
+                if not os.path.exists(f"./{job_id}/{bib_file_name}"):
+                    return PlainTextResponse("Failed to save uploaded file.", status_code=500)
         
             subprocess.run(["bibtex", job_id], cwd=job_id,
                            check=True,
