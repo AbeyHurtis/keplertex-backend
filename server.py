@@ -1,5 +1,5 @@
 from fastapi import FastAPI, BackgroundTasks, File, UploadFile, Header, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from typing import List
 import subprocess
 import shutil
@@ -105,8 +105,9 @@ async def compile_latex(background_tasks: BackgroundTasks,
         background_tasks.add_task(cleanup_files, job_id)
 
         # Return the compiled PDF
-        return FileResponse(f"./{job_id}/{pdf_file}", media_type='application/pdf',
-                            filename='output.pdf')
+        return StreamingResponse(open(f"{job_id}/{pdf_file}", "rb"),
+                         media_type="application/pdf",
+                         headers={"Content-Disposition": "attachment; filename=output.pdf"})
 
     except subprocess.CalledProcessError as e:
         return PlainTextResponse(f"LaTeX compilation failed:\n{e.stderr.decode()}",
