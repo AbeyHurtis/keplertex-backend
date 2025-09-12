@@ -4,6 +4,7 @@ import crypto from "crypto";
 import fetch from "node-fetch";
 
 const client = new DynamoDBClient({ region: process.env.AWS_REGION || "us-east-1" });
+
 const dynamo = DynamoDBDocumentClient.from(client);
 
 const USERS_TABLE = process.env.USERS_TABLE;
@@ -136,6 +137,11 @@ async function emailExists(email) {
 //         body: JSON.stringify({ exists })
 //     };
 // }
+
+// 2FA auth for email 
+async function tfaVerification(email) {
+
+}
 
 // Email/password signup
 async function signup({ username, email, password }) {
