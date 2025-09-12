@@ -140,6 +140,8 @@ async function emailExists(email) {
 
 // 2FA auth for email 
 async function tfaVerification(email) {
+    const ses = new AWS.SES({ region: process.env.AWS_REGION || "us-east-1" }); // choose your SES region
+    const { v4: uuidv4 } = require("uuid");
 
 }
 

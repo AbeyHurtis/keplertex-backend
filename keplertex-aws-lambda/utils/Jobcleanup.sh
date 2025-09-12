@@ -1,0 +1,1 @@
+find . -mindepth 1 -not -name 'server.py' -not -name '__pycache__' -not -name '/SyntaxTest' -exec rm -rf {} +
