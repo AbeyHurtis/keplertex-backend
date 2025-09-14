@@ -112,3 +112,8 @@ async def compile_latex(background_tasks: BackgroundTasks,
     except subprocess.CalledProcessError as e:
         return PlainTextResponse(f"LaTeX compilation failed:\n{e.stderr.decode()}",
                                  status_code=500)
+    
+
+def readSyntaxError(std_output): 
+    # Read texlive output
+    return None
