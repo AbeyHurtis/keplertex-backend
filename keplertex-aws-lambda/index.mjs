@@ -362,6 +362,9 @@ async function compileLatex(event) {
         body: buffer
     });
 
+    if(res.status === 500){
+        return { statuscode: 501, body: res};
+    }
     if (!res.ok) {
         const text = await res.text();
         return { statusCode: res.status, body: text };

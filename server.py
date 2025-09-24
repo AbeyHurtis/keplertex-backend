@@ -24,6 +24,39 @@ SECRET = os.environ['INTERNAL_SHARED_SECRET']
 #   -F 'tex_file=@./main.tex' \
 #   --output output.pdf
 
+def read_syntax_error(stdout: str, stderr: str) -> str:
+    """
+    Extract a readable LaTeX error message from pdflatex/bibtex logs.
+    """
+    errors = []
+    for line in stdout.splitlines():
+        if line.strip().startswith("!"):  # LaTeX error marker
+            errors.append(line)
+        elif line.strip().startswith("l."):  # line number
+            errors.append(line)
+
+    if not errors:
+        errors = stderr.splitlines()[-10:]  # fallback: last 10 stderr lines
+
+    return "LaTeX compilation failed:\n" + "\n".join(errors)
+
+
+# Run sub process
+def run_command(command, cwd):
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    if result.returncode != 0: 
+        return PlainTextResponse(read_syntax_error(result.stdout, result.stderr), status_code=500); 
+    return result
+
+
+
+
 @app.middleware("http")
 async def verify_internal_secret(request, call_next): 
     if request.headers.get("x-internal-auth") != SECRET:
@@ -65,10 +98,7 @@ async def compile_latex(background_tasks: BackgroundTasks,
             f.write(content)
 
         # Run pdflatex (twice is common for references/toc)
-        subprocess.run(["pdflatex", tex_file_name], cwd=job_id,
-                       check=True,
-                       stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE)
+        run_command(["pdflatex", tex_file_name], cwd=job_id)
         
         if bib_files: 
             for bib_file in bib_files: 
@@ -77,20 +107,11 @@ async def compile_latex(background_tasks: BackgroundTasks,
                     content = await bib_file.read()
                     f.write(content)
         
-            subprocess.run(["bibtex", job_id], cwd=job_id,
-                           check=True,
-                           stdout=subprocess.PIPE, 
-                           stderr=subprocess.PIPE)
+            run_command(["bibtex", job_id], cwd=job_id)
             
-            subprocess.run(["pdflatex", tex_file_name], cwd=job_id,
-                        check=True,
-                       stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE)
+            run_command(["pdflatex", tex_file_name], cwd=job_id)
 
-        subprocess.run(["pdflatex", tex_file_name], cwd=job_id,
-                       check=True,
-                       stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE)
+        run_command(["pdflatex", tex_file_name], cwd=job_id)
         
         # Debuging lines
         # result = subprocess.run(["pdflatex", tex_file_name], check=True,
