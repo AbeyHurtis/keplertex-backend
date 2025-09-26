@@ -4,12 +4,11 @@ import crypto from "crypto";
 import fetch from "node-fetch";
 
 const client = new DynamoDBClient({ region: process.env.AWS_REGION || "us-east-1" });
-
 const dynamo = DynamoDBDocumentClient.from(client);
 
 const USERS_TABLE = process.env.USERS_TABLE;
 const COMPILER_SERVICE_URL = process.env.COMPILER_SERVICE_URL;
-const DAILY_LIMIT = 50;
+const DAILY_LIMIT = process.env.DAILY_LIMIT;
 const EMAIL_INDEX = process.env.EMAIL_INDEX;
 
 // Hash password
@@ -23,8 +22,8 @@ function generateToken() {
 }
 
 function validateEmail(email) {
-  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return re.test(String(email).toLowerCase());
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return re.test(String(email).toLowerCase());
 }
 
 function validatePassword(password) {
@@ -41,7 +40,7 @@ function validatePassword(password) {
     if (!charMatches || charMatches.length < 2) {
         return "Password must include at least 2 special characters.";
     }
-    if(!/[A-Z]/.test(password)){
+    if (!/[A-Z]/.test(password)) {
         return "Password must include one capital letter";
     }
 
@@ -113,7 +112,7 @@ async function emailExists(email) {
     }
     const result = await dynamo.send(new QueryCommand({
         TableName: USERS_TABLE,
-        IndexName: EMAIL_INDEX, 
+        IndexName: EMAIL_INDEX,
         KeyConditionExpression: "email = :email",
         ExpressionAttributeValues: { ":email": email },
         Limit: 1
@@ -138,13 +137,6 @@ async function emailExists(email) {
 //     };
 // }
 
-// 2FA auth for email 
-async function tfaVerification(email) {
-    const ses = new AWS.SES({ region: process.env.AWS_REGION || "us-east-1" }); // choose your SES region
-    const { v4: uuidv4 } = require("uuid");
-
-}
-
 // Email/password signup
 async function signup({ username, email, password }) {
     const passwordError = validatePassword(password);
@@ -152,7 +144,7 @@ async function signup({ username, email, password }) {
         return { statusCode: 400, body: JSON.stringify({ error: passwordError }) };
     }
 
-   if (!validateEmail(email)) {
+    if (!validateEmail(email)) {
         return { statusCode: 400, body: JSON.stringify({ error: "Invalid email" }) };
     }
 
@@ -327,6 +319,17 @@ async function compileLatex(event) {
         return { statusCode: 401, body: JSON.stringify({ error: "Invalid token" }) };
     }
 
+    //  // Fetch user by username (primary key)
+    // const userRes = await dynamo.send(new GetCommand({
+    //     TableName: USERS_TABLE,
+    //     Key: { username }
+    // }));
+
+    // const user = userRes.Item;
+    // if (!user || user.accountToken !== token) {
+    //     return { statusCode: 401, body: JSON.stringify({ error: "Invalid credentials" }) };
+    // }
+
     // Rate limiting
     const today = new Date().toISOString().split("T")[0];
     let { requestsToday, lastRequestDate } = user.Items[0];
@@ -362,13 +365,21 @@ async function compileLatex(event) {
         body: buffer
     });
 
-    if(res.status === 500){
-        return { statuscode: 501, body: res};
-    }
     if (!res.ok) {
         const text = await res.text();
         return { statusCode: res.status, body: text };
     }
+
+    const statsUpdate = dynamo.send(new UpdateCommand({
+        TableName: "CompileStats",
+        Key: { pk: `global${Math.floor(Math.random()*10)}`, date: today },
+        UpdateExpression: "ADD #count :inc",
+        ExpressionAttributeNames: { "#count": "count" },
+        ExpressionAttributeValues: { ":inc": 1 },
+    }));
+    
+    statsUpdate.catch(err => console.error("Failed stats update", err));
+
 
     const pdfBuffer = await res.arrayBuffer();
     return {
