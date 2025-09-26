@@ -319,6 +319,17 @@ async function compileLatex(event) {
         return { statusCode: 401, body: JSON.stringify({ error: "Invalid token" }) };
     }
 
+    //  // Fetch user by username (primary key)
+    // const userRes = await dynamo.send(new GetCommand({
+    //     TableName: USERS_TABLE,
+    //     Key: { username }
+    // }));
+
+    // const user = userRes.Item;
+    // if (!user || user.accountToken !== token) {
+    //     return { statusCode: 401, body: JSON.stringify({ error: "Invalid credentials" }) };
+    // }
+
     // Rate limiting
     const today = new Date().toISOString().split("T")[0];
     let { requestsToday, lastRequestDate } = user.Items[0];
@@ -361,7 +372,7 @@ async function compileLatex(event) {
 
     const statsUpdate = dynamo.send(new UpdateCommand({
         TableName: "CompileStats",
-        Key: { pk: `global${random(0, 9)}`, date: today },
+        Key: { pk: `global${Math.floor(Math.random()*10)}`, date: today },
         UpdateExpression: "ADD #count :inc",
         ExpressionAttributeNames: { "#count": "count" },
         ExpressionAttributeValues: { ":inc": 1 },
